@@ -76,6 +76,11 @@ export const Carousel = <
   // Handle slide change
   const [slideIndex, setSlideIndex] = useState(0);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // Handle slide heights
+  const [currentSlideHeight, setCurrentSlideHeight] = useState(
+    () => wrapperRef.current?.scrollHeight ?? 0,
+  );
+  const previousSlideHeight = usePrevious(currentSlideHeight);
   const handleSlideChange = useCallback(
     (direction: number) => {
       setSlideIndex((prev) => {
@@ -90,9 +95,8 @@ export const Carousel = <
         const slide = wrapperRef.current?.children[newIndex];
         if (slide) {
           setCurrentSlideHeight(slide.scrollHeight);
-          onChangeSlide?.(newIndex, slide);
           if (slide instanceof HTMLElement) {
-            slide.focus({ preventScroll: true });
+            onChangeSlide?.(newIndex, slide);
           }
         }
 
@@ -102,16 +106,11 @@ export const Carousel = <
     [items.length, onChangeSlide],
   );
 
-  // Handle slide heights
-  const [currentSlideHeight, setCurrentSlideHeight] = useState(
-    wrapperRef.current?.scrollHeight ?? 0,
-  );
-  const previousSlideHeight = usePrevious(currentSlideHeight);
-  const observerRef = useRef<ResizeObserver>(
-    new ResizeObserver(() => {
-      handleSlideChange(0);
-    }),
-  );
+  const observerRef = useRef<ResizeObserver | null>(null);
+  observerRef.current ??= new ResizeObserver(() => {
+    handleSlideChange(0);
+  });
+
   const wrapperStyles = useSpring({
     x: `-${slideIndex * 100}%`,
     height: currentSlideHeight,
@@ -134,9 +133,13 @@ export const Carousel = <
   );
   const handlePrev = useCallback(() => {
     handleSlideChange(-1);
+    // We're focusing on the wrapper as the child slides can potentially be inert.
+    // Because of that, only the active slide can be focused anyway.
+    wrapperRef.current?.focus();
   }, [handleSlideChange]);
   const handleNext = useCallback(() => {
     handleSlideChange(1);
+    wrapperRef.current?.focus();
   }, [handleSlideChange]);
 
   const intl = useIntl();
@@ -172,6 +175,11 @@ export const Carousel = <
         className={`${classNamePrefix}__slides`}
         ref={wrapperRef}
         style={wrapperStyles}
+        aria-label={intl.formatMessage(messages.slide, {
+          current: slideIndex + 1,
+          max: items.length,
+        })}
+        tabIndex={-1}
       >
         {items.map((itemsProps, index) => (
           <CarouselSlideWrapper<SlideProps>
@@ -184,10 +192,6 @@ export const Carousel = <
               active: index === slideIndex,
             })}
             active={index === slideIndex}
-            label={intl.formatMessage(messages.slide, {
-              current: index + 1,
-              max: items.length,
-            })}
           />
         ))}
       </animated.div>
@@ -196,12 +200,11 @@ export const Carousel = <
 };
 
 type CarouselSlideWrapperProps<SlideProps extends CarouselSlideProps> = {
-  observer: ResizeObserver;
+  observer: ResizeObserver | null;
   className: string;
   active: boolean;
   item: SlideProps;
   index: number;
-  label: string;
 } & Pick<CarouselProps<SlideProps>, 'renderItem'>;
 
 const CarouselSlideWrapper = <SlideProps extends CarouselSlideProps>({
@@ -211,11 +214,10 @@ const CarouselSlideWrapper = <SlideProps extends CarouselSlideProps>({
   renderItem,
   item,
   index,
-  label,
 }: CarouselSlideWrapperProps<SlideProps>) => {
   const handleRef = useCallback(
     (instance: HTMLDivElement | null) => {
-      if (instance) {
+      if (observer && instance) {
         observer.observe(instance);
       }
     },
@@ -233,9 +235,7 @@ const CarouselSlideWrapper = <SlideProps extends CarouselSlideProps>({
       className={className}
       role='group'
       aria-roledescription='slide'
-      aria-label={label}
       inert={active ? undefined : ''}
-      tabIndex={-1}
       data-index={index}
     >
       {children}
